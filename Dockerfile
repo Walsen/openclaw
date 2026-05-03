@@ -42,13 +42,19 @@ RUN pnpm add -g openclaw@latest clawhub@latest
 # These are available to all tenants with zero cold-start overhead.
 # To customize: override SKILLS_PREINSTALL at build time.
 ARG SKILLS_PREINSTALL="deep-research-pro self-improving-agent jina-reader skill-vetter"
-RUN HOME=/root && mkdir -p /root/.openclaw && \
+RUN HOME=/root && mkdir -p /root/.openclaw/skills && \
     for skill in $SKILLS_PREINSTALL; do \
       for attempt in 1 2 3; do \
         clawhub install "$skill" --no-input --force && break; \
         echo "Retry $attempt for $skill..."; sleep 5; \
       done; \
-    done; echo "Built-in skills installed: $SKILLS_PREINSTALL"
+    done && \
+    # clawhub may install to /skills or ~/.openclaw/skills depending on version — consolidate
+    if [ -d /skills ] && [ "$(ls -A /skills 2>/dev/null)" ]; then \
+        cp -r /skills/. /root/.openclaw/skills/; \
+    fi && \
+    echo "Built-in skills installed: $SKILLS_PREINSTALL" && \
+    ls /root/.openclaw/skills/ 2>/dev/null || echo "(no skills in ~/.openclaw/skills)"
 
 # Find and copy templates so OpenClaw can find them from any cwd
 RUN mkdir -p /app/docs/reference && \
@@ -92,7 +98,7 @@ COPY --from=builder /app/.compile-cache /app/.compile-cache
 COPY --from=builder /app/docs/reference /app/docs/reference
 
 # Copy built-in skills from builder (Layer 1)
-# clawhub installs to ~/.openclaw/skills/ directory
+# clawhub installs to ~/.openclaw/skills/ — ensure dir exists even if no skills installed
 COPY --from=builder /root/.openclaw/skills /root/.openclaw/skills
 
 WORKDIR /app
