@@ -8,7 +8,7 @@
 # =============================================================================
 
 # Stage 1: Builder - install all dependencies and tools
-FROM --platform=linux/arm64 python:3.13-slim AS builder
+FROM python:3.13-slim AS builder
 
 ARG TARGETARCH=arm64
 
@@ -29,6 +29,10 @@ RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
 
 # Install pnpm globally, then use it for OpenClaw + ClawHub
 RUN npm install -g pnpm
+
+# Set PNPM_HOME so pnpm knows where to put global bin links
+ENV PNPM_HOME="/root/.local/share/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
 
 # Install OpenClaw and ClawHub CLI globally via pnpm
 # Using latest — test IM channels end-to-end if using Telegram/Discord/Slack
@@ -63,7 +67,7 @@ RUN mkdir -p /app/.compile-cache && \
     openclaw agent --help > /dev/null 2>&1 || true
 
 # Stage 2: Runtime - minimal image with only needed artifacts
-FROM --platform=linux/arm64 python:3.13-slim
+FROM python:3.13-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends jq curl \
     && rm -rf /var/lib/apt/lists/*
