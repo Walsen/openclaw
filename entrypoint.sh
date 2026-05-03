@@ -327,14 +327,16 @@ echo "[entrypoint] server.py PID=${SERVER_PID}"
             CURRENT_BASE=$(cat /tmp/base_tenant_id 2>/dev/null || echo "$BASE_TENANT_ID")
             if [ "$CURRENT_BASE" != "unknown" ] && [ -n "$CURRENT_BASE" ]; then
                 SYNC_TARGET="s3://${S3_BUCKET}/${CURRENT_BASE}/workspace/"
-                aws s3 sync "$WORKSPACE/" "$SYNC_TARGET" \
+                if aws s3 sync "$WORKSPACE/" "$SYNC_TARGET" \
                     --exclude "node_modules/*" --exclude "skills/_shared/*" --exclude "skills/*" \
                     --exclude "SOUL.md" --exclude "AGENTS.md" --exclude "TOOLS.md" \
                     --exclude "IDENTITY.md" --exclude "SESSION_CONTEXT.md" --exclude "CHANNELS.md" \
                     --exclude ".personal_soul_backup.md" \
                     --exclude "knowledge/*" \
                     --size-only --region "$AWS_REGION" \
-                    --quiet 2>/dev/null && echo "[watchdog] Synced to ${SYNC_TARGET}" || true
+                    --quiet 2>/dev/null; then
+                    echo "[watchdog] Synced to ${SYNC_TARGET}"
+                fi
             fi
             if [ -f "$WORKSPACE/.shared_agent" ]; then
                 SHARED_ID=$(cat "$WORKSPACE/.shared_agent")
