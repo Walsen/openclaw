@@ -1,0 +1,17 @@
+{
+  "enabled": true,
+  "name": "Python Compile Check",
+  "description": "Compiles all Python files to catch syntax errors when any .py file is created or edited",
+  "version": "1",
+  "when": {
+    "type": "fileEdited",
+    "patterns": [
+      "*.py"
+    ]
+  },
+  "then": {
+    "type": "runCommand",
+    "command": "python3 -m py_compile server.py && python3 -m py_compile workspace_assembler.py && python3 -m py_compile permissions.py && python3 -m py_compile identity.py && python3 -m py_compile memory.py && python3 -m py_compile observability.py && python3 -m py_compile safety.py && python3 -m py_compile skill_loader.py && python3 -m py_compile auth-agent/permission_request.py",
+    "timeout": 15
+  }
+}

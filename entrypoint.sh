@@ -309,6 +309,7 @@ echo "[entrypoint] server.py PID=${SERVER_PID}"
         --region "$AWS_REGION" 2>&1 || echo "[bg] skill_loader.py failed (non-fatal)"
 
     if [ -f /tmp/skill_env.sh ]; then
+        # shellcheck source=/dev/null
         . /tmp/skill_env.sh
         echo "[bg] Skill API keys loaded"
     fi
