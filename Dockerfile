@@ -27,16 +27,15 @@ RUN if [ "$TARGETARCH" = "arm64" ] || [ "$(uname -m)" = "aarch64" ]; then \
 RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
     && apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*
 
-# Install pnpm globally, then use it for OpenClaw + ClawHub
-RUN npm install -g pnpm
-
-# Set PNPM_HOME so pnpm knows where to put global bin links
+# Install pnpm globally, configure global bin dir, then install OpenClaw + ClawHub
+# PNPM_HOME must be set in the same RUN layer — ENV alone is not reliable across
+# buildx cache layers. We also set it via pnpm config as a belt-and-suspenders fix.
 ENV PNPM_HOME="/root/.local/share/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
-
-# Install OpenClaw and ClawHub CLI globally via pnpm
-# Using latest — test IM channels end-to-end if using Telegram/Discord/Slack
-RUN pnpm add -g openclaw@latest clawhub@latest
+RUN npm install -g pnpm && \
+    mkdir -p "$PNPM_HOME" && \
+    pnpm config set global-bin-dir "$PNPM_HOME" && \
+    pnpm add -g openclaw@latest clawhub@latest
 
 # Install enterprise built-in skills (Layer 1)
 # These are available to all tenants with zero cold-start overhead.
