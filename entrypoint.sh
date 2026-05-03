@@ -30,6 +30,60 @@ S3_BASE="s3://${S3_BUCKET}/${BASE_TENANT_ID}"
 echo "[entrypoint] START tenant=${TENANT_ID} base=${BASE_TENANT_ID} bucket=${S3_BUCKET}"
 
 # =============================================================================
+# LOCAL_DEV mode: skip all S3/DynamoDB/SSM calls, use local workspace only
+# =============================================================================
+if [ "${LOCAL_DEV:-}" = "true" ]; then
+    echo "[entrypoint] LOCAL_DEV mode — skipping S3/DynamoDB/SSM, using local workspace"
+    mkdir -p "$WORKSPACE" "$WORKSPACE/memory" "$WORKSPACE/skills" "$WORKSPACE/output"
+    ln -sfn "$WORKSPACE" /tmp/workspace
+    echo "${TENANT_ID}" > /tmp/tenant_id
+    echo "${BASE_TENANT_ID}" > /tmp/base_tenant_id
+
+    # Write openclaw.json
+    OPENCLAW_CONFIG_DIR="$HOME/.openclaw"
+    mkdir -p "$OPENCLAW_CONFIG_DIR"
+    sed -e "s|\${AWS_REGION}|${AWS_REGION}|g" \
+        -e "s|\${BEDROCK_MODEL_ID}|${BEDROCK_MODEL_ID:-global.anthropic.claude-sonnet-4-6}|g" \
+        /app/openclaw.json > "$OPENCLAW_CONFIG_DIR/openclaw.json"
+
+    # Write a minimal SOUL.md so OpenClaw has an identity
+    if [ ! -f "$WORKSPACE/SOUL.md" ]; then
+        cat > "$WORKSPACE/SOUL.md" <<'EOF'
+# Local Dev Agent
+
+You are a helpful AI assistant running locally via OpenClaw on Amazon Bedrock.
+You have access to web search, file operations, shell, and code execution tools.
+EOF
+    fi
+
+    export NODE_COMPILE_CACHE=/app/.compile-cache
+    export NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--dns-result-order=ipv4first"
+    export OPENCLAW_WORKSPACE="$WORKSPACE"
+    export OPENCLAW_SKIP_ONBOARDING=1
+    export OPENCLAW_SKIP_CRON=1
+
+    openclaw gateway --port 18789 > /tmp/openclaw-gateway.log 2>&1 &
+    GATEWAY_PID=$!
+    echo "[entrypoint] Gateway PID=${GATEWAY_PID}"
+
+    for i in $(seq 1 30); do
+        if curl -sf --connect-timeout 1 http://127.0.0.1:18789/__openclaw/control-ui-config.json >/dev/null 2>&1; then
+            echo "[entrypoint] Gateway ready (${i}s)"
+            break
+        fi
+        sleep 1
+    done
+
+    python /app/server.py &
+    SERVER_PID=$!
+    echo "[entrypoint] server.py PID=${SERVER_PID}"
+
+    trap 'kill "$GATEWAY_PID" "$SERVER_PID" 2>/dev/null; wait "$SERVER_PID" 2>/dev/null; echo "[entrypoint] LOCAL_DEV shutdown complete"; exit 0' SIGTERM SIGINT
+    wait "$SERVER_PID" || true
+    exit 0
+fi
+
+# =============================================================================
 # Step 0: Node.js runtime optimizations (before any openclaw invocation)
 # =============================================================================
 

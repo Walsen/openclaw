@@ -74,6 +74,10 @@ STACK_NAME = os.environ.get("STACK_NAME", "dev")
 AWS_REGION_RUNTIME = os.environ.get("AWS_REGION", "us-east-1")
 DYNAMODB_TABLE = os.environ.get("DYNAMODB_TABLE", os.environ.get("STACK_NAME", "openclaw"))
 DYNAMODB_REGION = os.environ.get("DYNAMODB_REGION", os.environ.get("AWS_REGION", "us-east-1"))
+LOCAL_DEV = os.environ.get("LOCAL_DEV", "").lower() in ("1", "true", "yes")
+
+if LOCAL_DEV:
+    logger.info("LOCAL_DEV mode enabled — skipping S3/DynamoDB/SSM calls")
 
 
 def _check_and_refresh_config_version() -> None:
@@ -171,6 +175,8 @@ def _write_usage_to_dynamodb(
     tenant_id: str, base_id: str, usage: dict, model: str, duration_ms: int, message: str = ""
 ):
     """Fire-and-forget: write usage metrics, session, and audit entry to DynamoDB."""
+    if LOCAL_DEV:
+        return
     try:
         from datetime import datetime, timezone
         from decimal import Decimal
@@ -296,6 +302,11 @@ def _write_usage_to_dynamodb(
 
 def _ensure_workspace_assembled(tenant_id: str) -> None:
     """Assemble workspace on first invocation for a tenant."""
+    if LOCAL_DEV:
+        # In local dev, mark as assembled immediately — no S3/DynamoDB needed.
+        # OpenClaw uses its local SQLite + markdown workspace directly.
+        _assembled_tenants.add(tenant_id)
+        return
     if tenant_id in _assembled_tenants or tenant_id == "unknown":
         return
 

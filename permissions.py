@@ -21,11 +21,19 @@ logger = logging.getLogger(__name__)
 STACK_NAME = os.environ.get("STACK_NAME", "dev")
 DYNAMODB_TABLE = os.environ.get("DYNAMODB_TABLE", os.environ.get("STACK_NAME", "openclaw"))
 DYNAMODB_REGION = os.environ.get("DYNAMODB_REGION", os.environ.get("AWS_REGION", "us-east-1"))
+LOCAL_DEV = os.environ.get("LOCAL_DEV", "").lower() in ("1", "true", "yes")
 
 DEFAULT_PROFILE = {
     "profile": "basic",
     "tools": ["web_search"],
     "data_permissions": {"file_paths": [], "api_endpoints": []},
+}
+
+# In LOCAL_DEV mode grant full tool access — no DynamoDB permission lookup
+LOCAL_DEV_PROFILE = {
+    "profile": "local",
+    "tools": ["web_search", "shell", "browser", "file", "file_write", "code_execution"],
+    "data_permissions": {"file_paths": ["*"], "api_endpoints": ["*"]},
 }
 
 # Always blocked for standard agents — arbitrary code execution risk.
@@ -50,6 +58,8 @@ def _base_tenant_id(tenant_id: str) -> str:
 
 def read_permission_profile(tenant_id: str) -> dict:
     """Read tenant's permission profile from DynamoDB."""
+    if LOCAL_DEV:
+        return dict(LOCAL_DEV_PROFILE)
     base_id = _base_tenant_id(tenant_id)
     try:
         ddb = boto3.resource("dynamodb", region_name=DYNAMODB_REGION)

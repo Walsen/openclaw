@@ -1,0 +1,45 @@
+services:
+  openclaw:
+    image: ffactory/openclaw:latest
+    # Uncomment to build locally instead:
+    # build: .
+    ports:
+      - "8080:8080"    # AgentCore HTTP contract (invocations, ping)
+      - "18789:18789"  # OpenClaw Gateway UI
+    environment:
+      # --- Local dev flag: skips all S3/DynamoDB/SSM calls ---
+      LOCAL_DEV: "true"
+
+      # --- AWS credentials (uses your local ~/.aws profile) ---
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_PROFILE: ${AWS_PROFILE:-default}
+
+      # --- Bedrock model ---
+      BEDROCK_MODEL_ID: ${BEDROCK_MODEL_ID:-global.anthropic.claude-sonnet-4-6}
+
+      # --- Session identity ---
+      SESSION_ID: ${SESSION_ID:-local-dev}
+
+      # --- Unused in LOCAL_DEV but required by entrypoint ---
+      S3_BUCKET: local
+      STACK_NAME: local
+
+    volumes:
+      # Mount AWS credentials read-only
+      - ${HOME}/.aws:/root/.aws:ro
+      # Persist OpenClaw workspace (SQLite memory, conversation history, skills)
+      - openclaw-workspace:/root/.openclaw/workspace
+
+    # ARM64 image — on x86 hosts Docker Desktop handles emulation automatically
+    platform: linux/arm64
+
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 45s
+
+volumes:
+  openclaw-workspace:
+    driver: local

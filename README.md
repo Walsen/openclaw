@@ -112,7 +112,55 @@ The container expects these environment variables at runtime (set by AgentCore/C
 
 MIT-0. See [LICENSE](LICENSE).
 
-## CI/CD
+## Local Development
+
+Run the container locally against real Bedrock — no LocalStack or mock services needed.
+
+**Prerequisites:** AWS credentials with Bedrock access (`~/.aws/credentials`), and Bedrock model access enabled in your account.
+
+```bash
+# Copy and edit the env template (optional — defaults work for most setups)
+cp local.env.example local.env
+
+# Start
+docker compose up
+
+# Or with a specific model
+BEDROCK_MODEL_ID=global.anthropic.claude-haiku-4-5-20251001-v1:0 docker compose up
+```
+
+**Test it:**
+
+```bash
+# Health check
+curl http://localhost:8080/ping
+
+# Send a message
+curl -X POST http://localhost:8080/invocations \
+  -H "Content-Type: application/json" \
+  -d '{"message": "What is the capital of France?"}'
+```
+
+**OpenClaw Gateway UI** is available at `http://localhost:18789` — full web interface for chatting with the agent directly.
+
+**What `LOCAL_DEV=true` does:**
+- Skips all S3/DynamoDB/SSM calls
+- Grants full tool access (shell, file, code_execution, web_search, browser)
+- Uses a named Docker volume (`openclaw-workspace`) for persistent SQLite memory across restarts
+- Writes a minimal `SOUL.md` on first start
+
+**What still works:**
+- Full OpenClaw agent loop via Bedrock ConverseStream
+- All built-in tools and baked-in ClawHub skills
+- Persistent conversation memory (Docker volume survives `docker compose down`)
+- OpenClaw Gateway web UI on port 18789
+
+**Reset memory:**
+```bash
+docker volume rm openclaw_openclaw-workspace
+```
+
+
 
 Two GitHub Actions workflows:
 
