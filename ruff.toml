@@ -1,0 +1,13 @@
+target-version = "py313"
+line-length = 120
+
+[lint]
+select = ["E", "F", "W", "I"]
+ignore = [
+    "E501",   # line too long — handled by formatter where possible
+    "F401",   # unused imports — some are intentional for runtime availability
+    "E402",   # module-level import not at top — needed for sys.path manipulation
+]
+
+[lint.per-file-ignores]
+"auth-agent/*" = ["I001"]
