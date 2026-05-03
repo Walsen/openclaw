@@ -1,0 +1,34 @@
+{
+  "packages": [
+    "nodejs_24@latest",
+    "pnpm@latest",
+    "python@latest",
+    "uv@latest",
+    "ruff@latest",
+    "just@latest",
+    "jq@latest",
+    "yq@latest",
+    "shellcheck@latest",
+    "docker@latest",
+    "awscli2@latest"
+  ],
+  "shell": {
+    "init_hook": [
+      "echo 'OpenClaw AgentCore dev environment ready'",
+      "echo 'Run: just --list'",
+      "uv sync --quiet 2>/dev/null || true"
+    ],
+    "scripts": {
+      "lint":    "ruff check . && ruff format --check . && shellcheck entrypoint.sh",
+      "fmt":     "ruff format .",
+      "test":    "python -m pytest tests/ -v --tb=short 2>/dev/null || echo 'No tests found'",
+      "compile": "python -m py_compile server.py workspace_assembler.py permissions.py identity.py memory.py observability.py safety.py skill_loader.py auth-agent/permission_request.py",
+      "check":   "bash scripts/pre-commit.sh",
+      "up":      "docker compose up",
+      "down":    "docker compose down",
+      "build":   "docker build --platform linux/arm64 -t ffactory/openclaw:local .",
+      "ping":    "curl -sf http://localhost:8080/ping | jq .",
+      "chat":    "curl -s -X POST http://localhost:8080/invocations -H 'Content-Type: application/json' -d '{\"message\": \"hello\"}' | jq -r .response"
+    }
+  }
+}
