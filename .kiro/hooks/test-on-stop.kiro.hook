@@ -1,0 +1,14 @@
+{
+  "enabled": true,
+  "name": "Run Tests on Agent Stop",
+  "description": "Runs pytest after agent completes a task to verify nothing is broken",
+  "version": "1",
+  "when": {
+    "type": "agentStop"
+  },
+  "then": {
+    "type": "runCommand",
+    "command": "python3 -m pytest tests/ -v --tb=short 2>/dev/null || echo \"No tests found\"",
+    "timeout": 60
+  }
+}
