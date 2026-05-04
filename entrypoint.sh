@@ -251,7 +251,30 @@ except Exception as e:
 fi
 
 # =============================================================================
+# Step 1: Start server.py IMMEDIATELY — health check must respond in seconds
+# AgentCore health-checks /ping right after container start. server.py must be
+# up before the Gateway wait loop, not after.
+# =============================================================================
+export OPENCLAW_WORKSPACE="$WORKSPACE"
+export OPENCLAW_SKIP_ONBOARDING=1
+export OPENCLAW_SKIP_CRON=1  # Disable built-in cron — EventBridge handles scheduling
+
+python /app/server.py &
+SERVER_PID=$!
+echo "[entrypoint] server.py PID=${SERVER_PID}"
+
+# Wait briefly for server.py to bind to port 8080
+for i in $(seq 1 10); do
+    if curl -sf --connect-timeout 1 http://127.0.0.1:8080/ping >/dev/null 2>&1; then
+        echo "[entrypoint] server.py ready on port 8080 (${i}s)"
+        break
+    fi
+    sleep 1
+done
+
+# =============================================================================
 # Step 0.7: Start OpenClaw Gateway — native session management + memory
+# (started AFTER server.py so health check passes immediately)
 # =============================================================================
 openclaw gateway --port 18789 > /tmp/openclaw-gateway.log 2>&1 &
 GATEWAY_PID=$!
@@ -308,16 +331,7 @@ if [ "$GATEWAY_READY" = "true" ] && [ -n "$_AGENT_SSM_ID" ]; then
     fi
 fi
 
-# =============================================================================
-# Step 1: Start server.py IMMEDIATELY — health check must respond in seconds
-# =============================================================================
-export OPENCLAW_WORKSPACE="$WORKSPACE"
-export OPENCLAW_SKIP_ONBOARDING=1
-export OPENCLAW_SKIP_CRON=1  # Disable built-in cron — EventBridge handles scheduling
-
-python /app/server.py &
-SERVER_PID=$!
-echo "[entrypoint] server.py PID=${SERVER_PID}"
+# (server.py already started above before Gateway wait)
 
 # =============================================================================
 # Step 2: S3 sync in background (non-blocking)
