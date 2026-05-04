@@ -279,7 +279,7 @@ except Exception as e:
     sys.stderr.write(f'[entrypoint] WARNING: Could not pre-inject credentials: {e}\n')
 " > /tmp/aws_creds.sh 2>&1 || true
 # shellcheck source=/dev/null
-[ -f /tmp/aws_creds.sh ] && . /tmp/aws_creds.sh || true
+if [ -f /tmp/aws_creds.sh ]; then . /tmp/aws_creds.sh; fi
 
 python /app/server.py &
 SERVER_PID=$!
