@@ -714,6 +714,26 @@ def _invoke_openclaw_once(tenant_id: str, message: str, timeout: int = 300) -> d
     """Run: openclaw agent --session-id <tenant_id> --message <message> --json"""
     env = os.environ.copy()
 
+    # Explicitly inject AWS credentials so the Node.js openclaw CLI can find them.
+    # In AgentCore, credentials come via the container credentials endpoint
+    # (AWS_CONTAINER_CREDENTIALS_RELATIVE_URI). boto3 resolves these fine, but
+    # the Node.js AWS SDK may not pick them up in all environments.
+    # We fetch them via boto3 and pass as explicit env vars.
+    try:
+        import boto3 as _b3creds
+
+        session_creds = _b3creds.Session().get_credentials()
+        if session_creds:
+            resolved = session_creds.resolve()
+            env["AWS_ACCESS_KEY_ID"] = resolved.access_key
+            env["AWS_SECRET_ACCESS_KEY"] = resolved.secret_key
+            if resolved.token:
+                env["AWS_SESSION_TOKEN"] = resolved.token
+            env["AWS_DEFAULT_REGION"] = env.get("AWS_REGION", "us-east-1")
+            logger.info("AWS credentials injected for openclaw subprocess")
+    except Exception as _cred_err:
+        logger.warning("Could not inject AWS credentials: %s", _cred_err)
+
     skill_env_file = "/tmp/skill_env.sh"
     if os.path.isfile(skill_env_file):
         try:
