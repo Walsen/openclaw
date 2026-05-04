@@ -5,7 +5,7 @@
 # server.py starts immediately for health check. S3 workspace assembled on first request.
 # openclaw agent CLI connects to Gateway → proper memory compaction and session state.
 # =============================================================================
-set -eo pipefail
+set -uo pipefail  # removed -e: server.py must start even if early commands fail
 
 TENANT_ID="${SESSION_ID:-${sessionId:-unknown}}"
 S3_BUCKET="${S3_BUCKET:-openclaw-tenants-000000000000}"
