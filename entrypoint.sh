@@ -259,27 +259,10 @@ export OPENCLAW_WORKSPACE="$WORKSPACE"
 export OPENCLAW_SKIP_ONBOARDING=1
 export OPENCLAW_SKIP_CRON=1  # Disable built-in cron — EventBridge handles scheduling
 
-# Pre-inject AWS credentials so the Node.js openclaw CLI can find them.
-# The CLI doesn't reliably pick up IAM role credentials from the container
-# environment (AWS_CONTAINER_CREDENTIALS_RELATIVE_URI). We resolve them via
-# Python/boto3 and export as explicit env vars that Node.js AWS SDK always reads.
-python3 -c "
-import boto3, os, sys
-try:
-    creds = boto3.Session().get_credentials()
-    if creds:
-        frozen = creds.get_frozen_credentials()
-        print(f'export AWS_ACCESS_KEY_ID={frozen.access_key}')
-        print(f'export AWS_SECRET_ACCESS_KEY={frozen.secret_key}')
-        if frozen.token:
-            print(f'export AWS_SESSION_TOKEN={frozen.token}')
-        print(f'export AWS_DEFAULT_REGION={os.environ.get(\"AWS_REGION\", \"us-east-1\")}')
-        sys.stderr.write(\"[entrypoint] AWS credentials pre-injected for Node.js\n\")
-except Exception as e:
-    sys.stderr.write(f'[entrypoint] WARNING: Could not pre-inject credentials: {e}\n')
-" > /tmp/aws_creds.sh 2>&1 || true
-# shellcheck source=/dev/null
-if [ -f /tmp/aws_creds.sh ]; then . /tmp/aws_creds.sh; fi
+# Note: AWS credentials are NOT pre-injected here.
+# server.py refreshes them per-request via boto3 (get_frozen_credentials),
+# which always fetches fresh credentials from the IAM execution role.
+# Pre-injecting at startup causes stale credentials after ~1 hour.
 
 python /app/server.py &
 SERVER_PID=$!
