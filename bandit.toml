@@ -1,0 +1,8 @@
+[tool.bandit]
+# B108: hardcoded /tmp paths — intentional in a container environment where
+# /tmp is the standard location for inter-process communication files
+# (skill_env.sh, tenant_id, workspace_status). Not a security concern here.
+#
+# B104: binding to 0.0.0.0 — intentional for a container that must listen
+# on all interfaces to receive requests from the AgentCore Runtime.
+skips = ["B108", "B104"]

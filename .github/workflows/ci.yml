@@ -55,6 +55,7 @@ jobs:
           python -m py_compile observability.py
           python -m py_compile safety.py
           python -m py_compile skill_loader.py
+          python -m py_compile gog_init.py
           python -m py_compile auth-agent/permission_request.py
 
       - name: Run tests
@@ -81,3 +82,53 @@ jobs:
           tags: ffactory/openclaw:test
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  security:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install security tools
+        run: pip install bandit pip-audit
+
+      - name: Bandit — Python security scan
+        run: bandit -r . -ll -q --exclude ./.venv,./tests -c bandit.toml
+
+      - name: pip-audit — dependency vulnerability scan
+        run: pip-audit -r requirements.txt
+
+      - name: Build image for scanning
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: false
+          tags: ffactory/openclaw:scan
+          load: true
+          cache-from: type=gha
+
+      - name: Trivy — container vulnerability scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ffactory/openclaw:scan
+          format: table
+          exit-code: "0"
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Gitleaks — secret detection
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
