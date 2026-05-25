@@ -46,11 +46,11 @@ def get_account_env(email: str, field: str) -> str:
 
 def write_credential_file(email: str) -> bool:
     """Write a gogcli credential JSON for one account. Returns True on success."""
-    client_id     = get_account_env(email, "CLIENT_ID")
+    client_id = get_account_env(email, "CLIENT_ID")
     client_secret = get_account_env(email, "CLIENT_SECRET")
     refresh_token = get_account_env(email, "REFRESH_TOKEN")
-    scopes_raw    = get_account_env(email, "SCOPES")
-    label         = get_account_env(email, "LABEL") or email.split("@")[0]
+    scopes_raw = get_account_env(email, "SCOPES")
+    label = get_account_env(email, "LABEL") or email.split("@")[0]
 
     if not all([client_id, client_secret, refresh_token]):
         log.warning("Skipping %s — missing CLIENT_ID, CLIENT_SECRET, or REFRESH_TOKEN", email)
@@ -60,14 +60,14 @@ def write_credential_file(email: str) -> bool:
 
     # gogcli credential file format
     cred = {
-        "account":        email,
-        "label":          label,
-        "client_id":      client_id,
-        "client_secret":  client_secret,
-        "refresh_token":  refresh_token,
-        "scopes":         scopes,
+        "account": email,
+        "label": label,
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "refresh_token": refresh_token,
+        "scopes": scopes,
         # access_token is intentionally omitted — gogcli will fetch one on first use
-        "token_type":     "Bearer",
+        "token_type": "Bearer",
     }
 
     GOG_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
@@ -158,7 +158,9 @@ def main() -> None:
 
     log.info(
         "gog initialization complete: %d/%d accounts ready, default=%s",
-        len(initialized), len(accounts), default_account,
+        len(initialized),
+        len(accounts),
+        default_account,
     )
 
 

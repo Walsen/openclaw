@@ -35,7 +35,19 @@ ENV PATH="$PNPM_HOME:$PATH"
 RUN npm install -g pnpm && \
     mkdir -p "$PNPM_HOME" && \
     pnpm config set global-bin-dir "$PNPM_HOME" && \
-    pnpm add -g openclaw@latest clawhub@latest gogcli@latest
+    pnpm add -g openclaw@latest clawhub@latest
+
+# Install gogcli — Google Workspace CLI (Go binary, not on npm)
+# Downloads the pre-built binary from GitHub Releases, architecture-aware.
+ARG GOGCLI_VERSION="0.19.0"
+RUN ARCH=$(uname -m) && \
+    if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then GOARCH="arm64"; else GOARCH="amd64"; fi && \
+    curl -fsSL "https://github.com/openclaw/gogcli/releases/download/v${GOGCLI_VERSION}/gogcli_${GOGCLI_VERSION}_linux_${GOARCH}.tar.gz" \
+        -o /tmp/gogcli.tar.gz && \
+    tar -xzf /tmp/gogcli.tar.gz -C /usr/local/bin gog && \
+    chmod +x /usr/local/bin/gog && \
+    rm /tmp/gogcli.tar.gz && \
+    gog --version
 
 # Install enterprise built-in skills (Layer 1)
 # These are available to all tenants with zero cold-start overhead.
@@ -92,9 +104,10 @@ ENV PATH="$PNPM_HOME:$PATH"
 
 # Re-create openclaw + gog symlinks if needed (COPY resolves symlinks, breaking ESM imports)
 RUN OPENCLAW_MJS=$(find $PNPM_HOME -name "openclaw.mjs" -path "*/openclaw/*" 2>/dev/null | head -1) && \
-    if [ -n "$OPENCLAW_MJS" ]; then ln -sf "$OPENCLAW_MJS" /usr/local/bin/openclaw; fi && \
-    GOG_BIN=$(find $PNPM_HOME -name "gog" -type f 2>/dev/null | head -1) && \
-    if [ -n "$GOG_BIN" ]; then ln -sf "$GOG_BIN" /usr/local/bin/gog; fi
+    if [ -n "$OPENCLAW_MJS" ]; then ln -sf "$OPENCLAW_MJS" /usr/local/bin/openclaw; fi
+
+# Copy gogcli binary from builder
+COPY --from=builder /usr/local/bin/gog /usr/local/bin/gog
 
 # Copy V8 compile cache + templates from builder
 COPY --from=builder /app/.compile-cache /app/.compile-cache
