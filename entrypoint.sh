@@ -206,6 +206,29 @@ with open(config_path, 'w') as f:
 fi
 
 # =============================================================================
+# Step 0.6.5: Initialize gog (Google Workspace CLI) credentials
+# Reads GOG_ACCOUNT_* env vars injected by the infra repo's deploy-phase2
+# and writes per-account credential files so gog can authenticate without
+# an interactive OAuth flow inside the container.
+#
+# Env var convention (set by scripts/cli.py _deploy_phase2):
+#   GOG_ACCOUNTS                          comma-separated list of account emails
+#   GOG_DEFAULT_ACCOUNT                   default account email
+#   GOG_ACCOUNT_<SAFE>_CLIENT_ID          OAuth client ID
+#   GOG_ACCOUNT_<SAFE>_CLIENT_SECRET      OAuth client secret
+#   GOG_ACCOUNT_<SAFE>_REFRESH_TOKEN      OAuth refresh token
+#   GOG_ACCOUNT_<SAFE>_SCOPES             comma-separated scope URLs
+#   GOG_ACCOUNT_<SAFE>_LABEL              human label (personal, work, …)
+# where SAFE = email.upper().replace('@','_AT_').replace('.','_')
+# =============================================================================
+if [ -n "${GOG_ACCOUNTS:-}" ]; then
+    echo "[entrypoint] Initializing gog credentials for: ${GOG_ACCOUNTS}"
+    python3 /app/gog_init.py 2>&1 || echo "[entrypoint] gog_init.py failed (non-fatal)"
+else
+    echo "[entrypoint] No GOG_ACCOUNTS set — Google Workspace integration not configured"
+fi
+
+# =============================================================================
 # Step 0.6.1: Auto-connect IM channels from DynamoDB credentials (Fargate)
 # =============================================================================
 if [ "$EFS_MODE" = "true" ] && [ "$BASE_TENANT_ID" != "unknown" ]; then

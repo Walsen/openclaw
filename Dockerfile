@@ -35,12 +35,14 @@ ENV PATH="$PNPM_HOME:$PATH"
 RUN npm install -g pnpm && \
     mkdir -p "$PNPM_HOME" && \
     pnpm config set global-bin-dir "$PNPM_HOME" && \
-    pnpm add -g openclaw@latest clawhub@latest
+    pnpm add -g openclaw@latest clawhub@latest gogcli@latest
 
 # Install enterprise built-in skills (Layer 1)
 # These are available to all tenants with zero cold-start overhead.
 # To customize: override SKILLS_PREINSTALL at build time.
-ARG SKILLS_PREINSTALL="deep-research-pro self-improving-agent jina-reader skill-vetter"
+# gog is included by default — Google credentials are injected at runtime
+# via GOG_ACCOUNT_* env vars set by `just setup-google` in the infra repo.
+ARG SKILLS_PREINSTALL="deep-research-pro self-improving-agent jina-reader skill-vetter gog"
 RUN HOME=/root && mkdir -p /root/.openclaw/skills && \
     for skill in $SKILLS_PREINSTALL; do \
       for attempt in 1 2 3; do \
@@ -88,9 +90,11 @@ COPY --from=builder /root/.local/share/pnpm /root/.local/share/pnpm
 ENV PNPM_HOME="/root/.local/share/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
 
-# Re-create openclaw symlink if needed (COPY resolves symlinks, breaking ESM imports)
+# Re-create openclaw + gog symlinks if needed (COPY resolves symlinks, breaking ESM imports)
 RUN OPENCLAW_MJS=$(find $PNPM_HOME -name "openclaw.mjs" -path "*/openclaw/*" 2>/dev/null | head -1) && \
-    if [ -n "$OPENCLAW_MJS" ]; then ln -sf "$OPENCLAW_MJS" /usr/local/bin/openclaw; fi
+    if [ -n "$OPENCLAW_MJS" ]; then ln -sf "$OPENCLAW_MJS" /usr/local/bin/openclaw; fi && \
+    GOG_BIN=$(find $PNPM_HOME -name "gog" -type f 2>/dev/null | head -1) && \
+    if [ -n "$GOG_BIN" ]; then ln -sf "$GOG_BIN" /usr/local/bin/gog; fi
 
 # Copy V8 compile cache + templates from builder
 COPY --from=builder /app/.compile-cache /app/.compile-cache
@@ -113,6 +117,7 @@ COPY observability.py .
 COPY safety.py .
 COPY skill_loader.py .
 COPY workspace_assembler.py .
+COPY gog_init.py .
 
 # Copy auth-agent module
 RUN mkdir -p /app/auth-agent
