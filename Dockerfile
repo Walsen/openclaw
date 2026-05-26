@@ -51,6 +51,18 @@ RUN npm install -g pnpm && \
     pnpm add -g openclaw@latest clawhub@latest && \
     pnpm add -g @smithy/node-http-handler @smithy/protocol-http @smithy/types
 
+# pnpm v11 virtual store layout can produce broken shims where the bin script
+# references a .mjs path that doesn't exist in the global store.
+# Find the actual openclaw.mjs and create a direct wrapper to bypass the shim.
+RUN OPENCLAW_MJS=$(find /root/.local/share/pnpm -name "openclaw.mjs" 2>/dev/null | head -1) && \
+    if [ -z "$OPENCLAW_MJS" ]; then \
+        echo "ERROR: openclaw.mjs not found after install" && exit 1; \
+    fi && \
+    echo "Found openclaw.mjs at: $OPENCLAW_MJS" && \
+    printf '#!/bin/sh\nexec node "%s" "$@"\n' "$OPENCLAW_MJS" > /usr/local/bin/openclaw && \
+    chmod +x /usr/local/bin/openclaw && \
+    openclaw --version 2>&1 | head -1 || true
+
 # Install gogcli — Google Workspace CLI (Go binary, not on npm)
 # Downloads the pre-built binary from GitHub Releases, architecture-aware.
 ARG GOGCLI_VERSION="0.19.0"
