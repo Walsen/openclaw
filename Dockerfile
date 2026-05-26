@@ -45,18 +45,13 @@ RUN pip install --no-cache-dir awscli boto3 requests && \
 # so hardlinks and symlinks are preserved correctly.
 ENV PNPM_HOME="/root/.local/share/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
-RUN npm install -g pnpm && \
-    mkdir -p "$PNPM_HOME" && \
-    pnpm config set global-bin-dir "$PNPM_HOME" && \
-    pnpm add -g openclaw@latest clawhub@latest && \
-    pnpm add -g @smithy/node-http-handler @smithy/protocol-http @smithy/types
 
-# pnpm v11 virtual store layout produces a shim that references a .mjs path
-# via a content-addressed hash that can become stale. Write a wrapper that
-# resolves the actual openclaw.mjs at runtime so it always finds the right file.
-RUN printf '#!/bin/sh\nOCLAW=$(find /root/.local/share/pnpm -name "openclaw.mjs" 2>/dev/null | head -1)\nif [ -z "$OCLAW" ]; then echo "openclaw.mjs not found" >&2; exit 1; fi\nexec node "$OCLAW" "$@"\n' \
-    > /usr/local/bin/openclaw && \
-    chmod +x /usr/local/bin/openclaw
+# Install openclaw and clawhub via npm (not pnpm) to avoid pnpm v11 virtual
+# store layout issues where dependency links break at runtime.
+# pnpm is still installed for clawhub skill installs later.
+RUN npm install -g pnpm openclaw@latest clawhub@latest \
+        @smithy/node-http-handler @smithy/protocol-http @smithy/types && \
+    pnpm config set global-bin-dir "$PNPM_HOME"
 
 # Install gogcli — Google Workspace CLI (Go binary, not on npm)
 # Downloads the pre-built binary from GitHub Releases, architecture-aware.
