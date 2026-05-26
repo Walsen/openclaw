@@ -35,7 +35,8 @@ ENV PATH="$PNPM_HOME:$PATH"
 RUN npm install -g pnpm && \
     mkdir -p "$PNPM_HOME" && \
     pnpm config set global-bin-dir "$PNPM_HOME" && \
-    pnpm add -g openclaw@latest clawhub@latest gogcli@latest
+    pnpm add -g openclaw@latest clawhub@latest && \
+    pnpm add -g @smithy/node-http-handler @smithy/protocol-http @smithy/types gogcli@latest
 
 # Install enterprise built-in skills (Layer 1)
 # These are available to all tenants with zero cold-start overhead.
