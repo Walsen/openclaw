@@ -1,19 +1,25 @@
 # =============================================================================
 # OpenClaw Agent Container for Bedrock AgentCore Runtime
-# Multi-stage build: builder (install everything) -> runtime (minimal image)
+# Single-stage build: Node.js + Python in one image.
+#
+# Why not multi-stage for Node/pnpm?
+# pnpm uses hardlinks and symlinks in its content-addressable store. Docker's
+# COPY --from resolves symlinks into regular files and cannot preserve hardlinks
+# across filesystem boundaries, which breaks ESM module resolution entirely.
+# The only correct approach is to install pnpm and all Node packages directly
+# in the final image, using a BuildKit cache mount to keep builds fast.
 #
 # Based on: github.com/aws-samples/sample-OpenClaw-on-AWS-with-Bedrock
 #           enterprise/agent-container/Dockerfile
 # Updated:  Latest Python 3.13, Node.js 24 LTS, OpenClaw latest
 # =============================================================================
 
-# Stage 1: Builder - install all dependencies and tools
-FROM python:3.13-slim AS builder
+FROM python:3.13-slim
 
 ARG TARGETARCH=arm64
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl unzip git && rm -rf /var/lib/apt/lists/*
+    curl unzip git jq && rm -rf /var/lib/apt/lists/*
 
 # Install AWS CLI v2 (architecture-aware)
 RUN if [ "$TARGETARCH" = "arm64" ] || [ "$(uname -m)" = "aarch64" ]; then \
@@ -27,12 +33,20 @@ RUN if [ "$TARGETARCH" = "arm64" ] || [ "$(uname -m)" = "aarch64" ]; then \
 RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
     && apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*
 
-# Install pnpm globally, configure global bin dir, then install OpenClaw + ClawHub
-# PNPM_HOME must be set in the same RUN layer — ENV alone is not reliable across
-# buildx cache layers. We also set it via pnpm config as a belt-and-suspenders fix.
+# Install Python dependencies
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir awscli boto3 requests && \
+    pip install --no-cache-dir -r /tmp/requirements.txt
+
+# Install pnpm + OpenClaw + ClawHub.
+# Using a BuildKit cache mount so the pnpm store persists across builds —
+# packages are only re-downloaded when versions change, not on every build.
+# pnpm is installed and runs entirely within this single filesystem layer,
+# so hardlinks and symlinks are preserved correctly.
 ENV PNPM_HOME="/root/.local/share/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
-RUN npm install -g pnpm && \
+RUN --mount=type=cache,id=pnpm-store,target=/root/.local/share/pnpm/store \
+    npm install -g pnpm && \
     mkdir -p "$PNPM_HOME" && \
     pnpm config set global-bin-dir "$PNPM_HOME" && \
     pnpm add -g openclaw@latest clawhub@latest
@@ -75,47 +89,11 @@ RUN mkdir -p /app/docs/reference && \
     if [ -n "$TEMPLATE_DIR" ]; then cp -r "$TEMPLATE_DIR" /app/docs/reference/templates; \
     else echo "WARNING: templates not found, creating empty dir" && mkdir -p /app/docs/reference/templates; fi
 
-# Install Python dependencies
-COPY requirements.txt /tmp/requirements.txt
-RUN pip install --no-cache-dir -r /tmp/requirements.txt
-
 # Pre-warm V8 Compile Cache (Node.js 22+)
 # Caches compiled bytecode so openclaw CLI modules load faster at runtime
 RUN mkdir -p /app/.compile-cache && \
     NODE_COMPILE_CACHE=/app/.compile-cache OPENCLAW_SKIP_ONBOARDING=1 \
     openclaw agent --help > /dev/null 2>&1 || true
-
-# Stage 2: Runtime - minimal image with only needed artifacts
-FROM python:3.13-slim
-
-RUN apt-get update && apt-get install -y --no-install-recommends jq curl \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install AWS CLI via pip (not binary copy — avoids Python version mismatch)
-RUN pip install --no-cache-dir awscli boto3 requests
-
-# Copy Node.js runtime from builder
-COPY --from=builder /usr/bin/node /usr/bin/node
-
-# Copy pnpm global store + bin links from builder
-COPY --from=builder /root/.local/share/pnpm /root/.local/share/pnpm
-ENV PNPM_HOME="/root/.local/share/pnpm"
-ENV PATH="$PNPM_HOME:$PATH"
-
-# Re-create openclaw + gog symlinks if needed (COPY resolves symlinks, breaking ESM imports)
-RUN OPENCLAW_MJS=$(find $PNPM_HOME -name "openclaw.mjs" -path "*/openclaw/*" 2>/dev/null | head -1) && \
-    if [ -n "$OPENCLAW_MJS" ]; then ln -sf "$OPENCLAW_MJS" /usr/local/bin/openclaw; fi
-
-# Copy gogcli binary from builder
-COPY --from=builder /usr/local/bin/gog /usr/local/bin/gog
-
-# Copy V8 compile cache + templates from builder
-COPY --from=builder /app/.compile-cache /app/.compile-cache
-COPY --from=builder /app/docs/reference /app/docs/reference
-
-# Copy built-in skills from builder (Layer 1)
-# clawhub installs to ~/.openclaw/skills/ — ensure dir exists even if no skills installed
-COPY --from=builder /root/.openclaw/skills /root/.openclaw/skills
 
 WORKDIR /app
 
