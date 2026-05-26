@@ -3,6 +3,15 @@
 # Install: cp scripts/pre-commit.sh .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
 set -e
 
+# Ensure devbox-managed tools (shellcheck, ruff, etc.) are on PATH
+# when running outside of a devbox shell (e.g. git commit from IDE or bare terminal).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+DEVBOX_BIN="$REPO_ROOT/.devbox/nix/profile/default/bin"
+if [ -d "$DEVBOX_BIN" ]; then
+    export PATH="$DEVBOX_BIN:$PATH"
+fi
+
 echo "=== Pre-commit: ruff lint ==="
 ruff check .
 
