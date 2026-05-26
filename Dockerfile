@@ -45,8 +45,7 @@ RUN pip install --no-cache-dir awscli boto3 requests && \
 # so hardlinks and symlinks are preserved correctly.
 ENV PNPM_HOME="/root/.local/share/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
-RUN --mount=type=cache,id=pnpm-store,target=/root/.local/share/pnpm/store \
-    npm install -g pnpm && \
+RUN npm install -g pnpm && \
     mkdir -p "$PNPM_HOME" && \
     pnpm config set global-bin-dir "$PNPM_HOME" && \
     pnpm add -g openclaw@latest clawhub@latest && \
