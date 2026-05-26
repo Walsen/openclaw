@@ -67,9 +67,9 @@ RUN ARCH=$(uname -m) && \
 # Install enterprise built-in skills (Layer 1)
 # These are available to all tenants with zero cold-start overhead.
 # To customize: override SKILLS_PREINSTALL at build time.
-# gog is included by default — Google credentials are injected at runtime
-# via GOG_ACCOUNT_* env vars set by `just setup-google` in the infra repo.
-ARG SKILLS_PREINSTALL="deep-research-pro self-improving-agent jina-reader skill-vetter gog"
+# Note: gog (gogcli) is installed as a binary above — not via clawhub.
+# gog_init.py handles credential setup at container startup.
+ARG SKILLS_PREINSTALL="deep-research-pro self-improving-agent jina-reader skill-vetter"
 RUN HOME=/root && mkdir -p /root/.openclaw/skills && \
     for skill in $SKILLS_PREINSTALL; do \
       for attempt in 1 2 3; do \
