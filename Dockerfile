@@ -49,7 +49,8 @@ RUN --mount=type=cache,id=pnpm-store,target=/root/.local/share/pnpm/store \
     npm install -g pnpm && \
     mkdir -p "$PNPM_HOME" && \
     pnpm config set global-bin-dir "$PNPM_HOME" && \
-    pnpm add -g openclaw@latest clawhub@latest
+    pnpm add -g openclaw@latest clawhub@latest && \
+    pnpm add -g @smithy/node-http-handler @smithy/protocol-http @smithy/types
 
 # Install gogcli — Google Workspace CLI (Go binary, not on npm)
 # Downloads the pre-built binary from GitHub Releases, architecture-aware.
