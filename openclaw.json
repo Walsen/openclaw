@@ -39,7 +39,7 @@
   "gateway": {
     "port": 18789,
     "mode": "local",
-    "bind": "lan",
+    "bind": "localhost",
     "auth": {
       "mode": "none"
     },
