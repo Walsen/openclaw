@@ -285,6 +285,46 @@ def _build_context_block(
         "- DynamoDB: read/write application data\n"
     )
 
+    # 6. Active integrations (gog / Google Workspace, etc.)
+    # GOG_ACCOUNTS is written to /tmp/skill_env.sh by gog_init.py — read it if not in env
+    gog_default = os.environ.get("GOG_DEFAULT_ACCOUNT", "")
+    gog_accounts_raw = os.environ.get("GOG_ACCOUNTS", "")
+    if not gog_accounts_raw:
+        skill_env = "/tmp/skill_env.sh"
+        if os.path.isfile(skill_env):
+            try:
+                with open(skill_env) as _f:
+                    for _line in _f:
+                        _line = _line.strip()
+                        if _line.startswith("export GOG_ACCOUNTS="):
+                            gog_accounts_raw = _line.split("=", 1)[1].strip("'\"")
+                        elif _line.startswith("export GOG_DEFAULT_ACCOUNT=") and not gog_default:
+                            gog_default = _line.split("=", 1)[1].strip("'\"")
+            except IOError:
+                pass
+    gog_accounts = [a.strip() for a in gog_accounts_raw.split(",") if a.strip()] if gog_accounts_raw else []
+    if not gog_accounts and gog_default:
+        gog_accounts = [gog_default]
+
+    if gog_accounts:
+        account_list = "\n".join(f"  - `{a}`" for a in gog_accounts)
+        default_note = f" (default: `{gog_default}`)" if gog_default else ""
+        parts.append(
+            "<!-- ACTIVE INTEGRATIONS -->\n"
+            "**Google Workspace** is connected and ready to use via the `gog` CLI tool.\n\n"
+            f"Connected accounts{default_note}:\n{account_list}\n\n"
+            "Available capabilities (use `shell` tool to run `gog` commands):\n"
+            "- **Gmail**: `gog gmail list`, `gog gmail read <id>`, `gog gmail send`, `gog gmail search <query>`\n"
+            "- **Calendar**: `gog calendar list`, `gog calendar create`, `gog calendar today`\n"
+            "- **Drive**: `gog drive list`, `gog drive download <id>`, `gog drive upload <file>`\n"
+            "- **Contacts**: `gog contacts list`, `gog contacts search <name>`\n"
+            "- **Sheets**: `gog sheets read <id>`, `gog sheets write`\n"
+            "- **Docs**: `gog docs read <id>`, `gog docs create`\n\n"
+            "When the user asks about email, calendar, contacts, or Google Drive — use `gog` directly. "
+            "Do NOT say you lack access to these services.\n"
+            "To switch accounts: `gog --account other@example.com gmail list`\n"
+        )
+
     return "\n\n---\n\n".join(parts) if parts else ""
 
 

@@ -49,6 +49,7 @@ jobs:
         run: |
           python -m py_compile server.py
           python -m py_compile workspace_assembler.py
+          python -m py_compile gog_init.py
           python -m py_compile permissions.py
           python -m py_compile identity.py
           python -m py_compile memory.py
