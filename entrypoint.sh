@@ -224,6 +224,10 @@ fi
 if [ -n "${GOG_ACCOUNTS:-}" ]; then
     echo "[entrypoint] Initializing gog credentials for: ${GOG_ACCOUNTS}"
     python3 /app/gog_init.py 2>&1 || echo "[entrypoint] gog_init.py failed (non-fatal)"
+    # Export GOG_CONFIG_DIR globally so all child processes (including gog CLI
+    # invoked by the agent's shell tool) can find the credential files.
+    export GOG_CONFIG_DIR="${HOME:-/root}/.config/gog"
+    echo "[entrypoint] GOG_CONFIG_DIR=${GOG_CONFIG_DIR}"
 else
     echo "[entrypoint] No GOG_ACCOUNTS set — Google Workspace integration not configured"
 fi
