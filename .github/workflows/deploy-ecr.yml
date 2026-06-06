@@ -1,0 +1,107 @@
+name: Deploy to ECR + AgentCore
+
+# Builds the openclaw runtime image for linux/arm64 (AgentCore's architecture),
+# pushes it to ECR, and updates the AgentCore runtime to the new image — all in
+# GitHub, no local Docker build required.
+#
+# Auth is keyless via GitHub OIDC -> IAM role OpenClawGitHubECRDeploy.
+# Required repo variables (Settings -> Secrets and variables -> Actions -> Variables):
+#   AWS_ROLE_ARN     arn:aws:iam::862307432587:role/OpenClawGitHubECRDeploy
+#   AWS_REGION       us-east-1
+#   ECR_REPOSITORY   openclaw-runtime
+#   AGENT_RUNTIME_ID openclaw_agent-mF4Hq3HJz8
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      update_runtime:
+        description: "Update the AgentCore runtime after pushing"
+        type: boolean
+        default: true
+
+permissions:
+  id-token: write   # required for OIDC
+  contents: read
+
+concurrency:
+  group: deploy-ecr-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-push-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build and push (linux/arm64)
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/arm64
+          push: true
+          provenance: false
+          tags: |
+            ${{ steps.ecr.outputs.registry }}/${{ vars.ECR_REPOSITORY }}:latest
+            ${{ steps.ecr.outputs.registry }}/${{ vars.ECR_REPOSITORY }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Update AgentCore runtime to new image
+        if: ${{ github.event_name == 'push' || inputs.update_runtime }}
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          REPO: ${{ vars.ECR_REPOSITORY }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          RUNTIME_ID: ${{ vars.AGENT_RUNTIME_ID }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        run: |
+          set -euo pipefail
+          # Pin by digest so AgentCore is guaranteed to roll to this exact build,
+          # not whatever ':latest' happens to resolve to.
+          IMAGE_URI="${REGISTRY}/${REPO}@${DIGEST}"
+          echo "Updating runtime ${RUNTIME_ID} to ${IMAGE_URI}"
+
+          # update-agent-runtime is a FULL REPLACE: it requires roleArn,
+          # networkConfiguration, lifecycleConfiguration, and environmentVariables.
+          # Omitting any of them (e.g. the GOG_* vars) would wipe them. So we read
+          # the current runtime config and re-submit it unchanged except the image.
+          CUR=$(aws bedrock-agentcore-control get-agent-runtime \
+            --region "${AWS_REGION}" \
+            --agent-runtime-id "${RUNTIME_ID}")
+
+          ROLE_ARN=$(echo "$CUR"  | jq -r '.roleArn')
+          NETWORK=$(echo "$CUR"   | jq -c '.networkConfiguration')
+          LIFECYCLE=$(echo "$CUR" | jq -c '.lifecycleConfiguration')
+          ENVVARS=$(echo "$CUR"   | jq -c '.environmentVariables')
+          ARTIFACT=$(jq -nc --arg uri "$IMAGE_URI" \
+            '{containerConfiguration:{containerUri:$uri}}')
+
+          aws bedrock-agentcore-control update-agent-runtime \
+            --region "${AWS_REGION}" \
+            --agent-runtime-id "${RUNTIME_ID}" \
+            --agent-runtime-artifact "${ARTIFACT}" \
+            --role-arn "${ROLE_ARN}" \
+            --network-configuration "${NETWORK}" \
+            --lifecycle-configuration "${LIFECYCLE}" \
+            --environment-variables "${ENVVARS}"
+
+          echo "Runtime update submitted. New sessions will use the new image."
