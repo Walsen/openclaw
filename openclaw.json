@@ -39,7 +39,7 @@
   "gateway": {
     "port": 18789,
     "mode": "local",
-    "bind": "lan",
+    "bind": "loopback",
     "auth": {
       "mode": "none"
     },
@@ -49,6 +49,15 @@
     }
   },
   "plugins": {
-    "entries": {}
+    "entries": {
+      "amazon-bedrock": {
+        "config": {
+          "discovery": {
+            "enabled": true,
+            "region": "${AWS_REGION}"
+          }
+        }
+      }
+    }
   }
 }

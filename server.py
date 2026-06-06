@@ -755,11 +755,13 @@ def _invoke_openclaw_once(tenant_id: str, message: str, timeout: int = 300) -> d
         env["PATH"] = nvm_bins[0] + ":" + env.get("PATH", "")
         env["HOME"] = "/home/ubuntu"
 
-    # Ensure GOG_CONFIG_DIR is always explicitly set so gog CLI finds credentials
-    # regardless of HOME overrides above. Credentials are written to /root/.config/gog
-    # by gog_init.py at container startup.
-    if "GOG_CONFIG_DIR" not in env:
-        env["GOG_CONFIG_DIR"] = "/root/.config/gog"
+    # gogcli credentials live under GOG_HOME (default ~/.config/gogcli), and the
+    # refresh token is in the encrypted file keyring. gog_init.py writes
+    # GOG_HOME / GOG_KEYRING_BACKEND / GOG_KEYRING_PASSWORD into /tmp/skill_env.sh,
+    # which is loaded above, so the agent subprocess inherits them. Only set a
+    # default GOG_HOME if it was not provided, so gog can locate credentials.json.
+    if "GOG_HOME" not in env:
+        env["GOG_HOME"] = f"{env.get('HOME', '/root')}/.config/gogcli"
 
     openclaw_cmd = [
         OPENCLAW_BIN,
