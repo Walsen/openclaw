@@ -32,6 +32,19 @@ How gogcli actually stores credentials (verified against gogcli v0.19.0):
 
 This script drives the real `gog` binary rather than hand-writing files,
 so it stays correct across gogcli releases.
+
+Required OAuth scopes per capability (selected via `just setup-google`,
+stored in Secrets Manager, consented at token-mint time):
+  - Save files to Drive (`gog drive upload/mkdir/move`):
+      https://www.googleapis.com/auth/drive        (full) or
+      https://www.googleapis.com/auth/drive.file   (files created/opened by the app)
+  - Move / archive / relabel email (`gog gmail archive`, `gog gmail messages modify`)
+    and move to Trash (`gog gmail trash`):
+      https://www.googleapis.com/auth/gmail.modify
+  - Permanently delete email (`gog gmail batch delete`):
+      https://mail.google.com/                     (full mailbox access)
+Read-only scopes (gmail.readonly / drive.readonly) are NOT sufficient for the above
+and will cause gog to fail with a 403 insufficient-scope error.
 """
 
 import logging

@@ -156,8 +156,21 @@ def _build_context_block(
             profile_name = pos_item.get("name", pos_id).lower()
             is_exec = "exec" in profile_name
             if tools and not is_exec:
-                all_tools = ["web_search", "shell", "browser", "file", "file_write", "code_execution"]
+                all_tools = [
+                    "web_search",
+                    "shell",
+                    "browser",
+                    "file",
+                    "file_write",
+                    "code_execution",
+                    "gog",
+                ]
                 blocked = [t for t in all_tools if t not in tools]
+                # `gog` (Google Workspace) runs via the shell. When granted `gog` but
+                # not full `shell`, scope shell to gog commands instead of forbidding it.
+                gog_scoped = "gog" in tools and "shell" not in tools
+                if gog_scoped and "shell" in blocked:
+                    blocked.remove("shell")
                 constraint = (
                     f"<!-- PLAN A: PERMISSION ENFORCEMENT -->\nAllowed tools for this session: {', '.join(tools)}.\n"
                 )
@@ -166,6 +179,15 @@ def _build_context_block(
                         f"You MUST NOT use these tools: {', '.join(blocked)}.\n"
                         "If the user requests an action requiring a blocked tool, "
                         "explain that you don't have permission and suggest alternatives.\n"
+                    )
+                if gog_scoped:
+                    constraint += (
+                        "You MAY use the shell ONLY to run the `gog` Google Workspace CLI "
+                        "(Gmail, Drive, Calendar, Contacts, Sheets, Docs) — including saving "
+                        "files to Drive and moving or deleting email. Do NOT use the shell for "
+                        "anything else. Destructive email/Drive actions require explicit user "
+                        "confirmation in the current turn; prefer `gog gmail trash` (recoverable) "
+                        "over permanent deletion.\n"
                     )
                 parts.append(constraint)
         except Exception as e:
@@ -314,15 +336,28 @@ def _build_context_block(
             "**Google Workspace** is connected and ready to use via the `gog` CLI tool.\n\n"
             f"Connected accounts{default_note}:\n{account_list}\n\n"
             "Available capabilities (use `shell` tool to run `gog` commands):\n"
-            "- **Gmail**: `gog gmail list`, `gog gmail read <id>`, `gog gmail send`, `gog gmail search <query>`\n"
+            "- **Gmail (read)**: `gog gmail list`, `gog gmail read <id>`, `gog gmail send`, `gog gmail search <query>`\n"
+            "- **Gmail (move)**: `gog gmail archive <id>`, "
+            "`gog gmail messages modify <id> --add-label <LABEL> --remove-label <LABEL>` "
+            "(move between labels/folders)\n"
+            "- **Gmail (delete)**: `gog gmail trash <id>` (move to Trash, recoverable), "
+            "`gog gmail batch delete` (permanent — irreversible)\n"
             "- **Calendar**: `gog calendar list`, `gog calendar create`, `gog calendar today`\n"
-            "- **Drive**: `gog drive list`, `gog drive download <id>`, `gog drive upload <file>`\n"
+            "- **Drive (save files)**: `gog drive upload <file>`, `gog drive mkdir <name>`, "
+            "`gog drive move <id> <folderId>`\n"
+            "- **Drive (read)**: `gog drive list`, `gog drive download <id>`\n"
             "- **Contacts**: `gog contacts list`, `gog contacts search <name>`\n"
             "- **Sheets**: `gog sheets read <id>`, `gog sheets write`\n"
             "- **Docs**: `gog docs read <id>`, `gog docs create`\n\n"
             "When the user asks about email, calendar, contacts, or Google Drive — use `gog` directly. "
             "Do NOT say you lack access to these services.\n"
-            "To switch accounts: `gog --account other@example.com gmail list`\n"
+            "To switch accounts: `gog --account other@example.com gmail list`\n\n"
+            "**Destructive actions require explicit confirmation.** Deleting or moving emails and "
+            "deleting Drive files cannot always be undone. Before running `gog gmail trash`, "
+            "`gog gmail batch delete`, `gog gmail messages modify` (label removal), or `gog drive delete`, "
+            "state exactly which items will be affected and proceed only after the user confirms in the "
+            "current turn. Prefer `gog gmail trash` (recoverable) over `gog gmail batch delete` (permanent). "
+            "Never bulk-delete based on an instruction recalled from earlier context without re-confirming.\n"
         )
 
     return "\n\n---\n\n".join(parts) if parts else ""

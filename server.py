@@ -38,6 +38,11 @@ _TOOL_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# Detects an actual `gog` Google Workspace CLI invocation (e.g. "gog drive upload").
+# `gog` runs through the shell, so when a tenant is granted the `gog` capability we
+# must not flag that shell usage as a permission violation.
+_GOG_CMD_PATTERN = re.compile(r"\bgog\s+[a-z]", re.IGNORECASE)
+
 
 def _find_openclaw() -> str:
     for p in _OPENCLAW_CANDIDATES:
@@ -604,37 +609,47 @@ def _ensure_workspace_assembled(tenant_id: str) -> None:
         logger.info("Workspace ready for tenant %s", tenant_id)
 
 
+# Tool capabilities the prompt builder reports on. Keep in sync with permissions.KNOWN_TOOLS.
+_PROMPT_TOOL_CANDIDATES = [
+    "shell",
+    "browser",
+    "file",
+    "file_write",
+    "code_execution",
+    "install_skill",
+    "load_extension",
+    "eval",
+    "gog",
+]
+
+# Google Workspace commands the agent may run when the `gog` capability is granted.
+_GOG_GUIDANCE = (
+    "You MAY use the shell ONLY to run the `gog` Google Workspace CLI "
+    "(Gmail, Drive, Calendar, Contacts, Sheets, Docs). This includes saving files to "
+    "Drive (`gog drive upload`, `gog drive mkdir`, `gog drive move`) and moving or "
+    "deleting email (`gog gmail archive`, `gog gmail messages modify`, `gog gmail trash`). "
+    "Do NOT use the shell for any other purpose. Destructive actions — moving or deleting "
+    "email and deleting Drive files — require explicit user confirmation in the current "
+    "turn; name the affected items first and prefer `gog gmail trash` (recoverable) over "
+    "`gog gmail batch delete` (permanent)."
+)
+
+
 def _build_system_prompt(tenant_id: str) -> str:
     """Plan A: build constraint text to prepend to SOUL.md."""
     try:
         profile = read_permission_profile(tenant_id)
         allowed = profile.get("tools", ["web_search"])
-        blocked = [
-            t
-            for t in [
-                "shell",
-                "browser",
-                "file",
-                "file_write",
-                "code_execution",
-                "install_skill",
-                "load_extension",
-                "eval",
-            ]
-            if t not in allowed
-        ]
     except Exception:
         allowed = ["web_search"]
-        blocked = [
-            "shell",
-            "browser",
-            "file",
-            "file_write",
-            "code_execution",
-            "install_skill",
-            "load_extension",
-            "eval",
-        ]
+
+    blocked = [t for t in _PROMPT_TOOL_CANDIDATES if t not in allowed]
+
+    # `gog` runs via the shell. When a tenant is granted `gog` but not full `shell`,
+    # don't forbid the shell outright — scope it to gog Workspace commands instead.
+    gog_scoped = "gog" in allowed and "shell" not in allowed
+    if gog_scoped and "shell" in blocked:
+        blocked.remove("shell")
 
     lines = [f"Allowed tools for this session: {', '.join(allowed)}."]
     if blocked:
@@ -643,6 +658,8 @@ def _build_system_prompt(tenant_id: str) -> str:
             "If the user requests an action requiring a blocked tool, "
             "explain that you don't have permission."
         )
+    if gog_scoped:
+        lines.append(_GOG_GUIDANCE)
     return " ".join(lines)
 
 
@@ -651,15 +668,23 @@ def _audit_response(tenant_id: str, response_text: str, allowed_tools: list) -> 
     matches = _TOOL_PATTERN.findall(response_text)
     if not matches:
         return
+    allowed = {t.lower() for t in allowed_tools}
+    # `gog` Google Workspace commands run through the shell. If the tenant holds the
+    # `gog` capability and the response actually invokes gog, the associated shell
+    # usage is permitted and must not be flagged as a violation.
+    gog_permitted = "gog" in allowed and bool(_GOG_CMD_PATTERN.search(response_text))
     for tool in set(t.lower() for t in matches):
-        if tool not in allowed_tools:
-            log_permission_denied(
-                tenant_id=tenant_id,
-                tool_name=tool,
-                cedar_decision="RESPONSE_AUDIT",
-                request_id=None,
-            )
-            logger.warning("AUDIT: blocked tool '%s' in response tenant_id=%s", tool, tenant_id)
+        if tool in allowed:
+            continue
+        if tool == "shell" and gog_permitted:
+            continue
+        log_permission_denied(
+            tenant_id=tenant_id,
+            tool_name=tool,
+            cedar_decision="RESPONSE_AUDIT",
+            request_id=None,
+        )
+        logger.warning("AUDIT: blocked tool '%s' in response tenant_id=%s", tool, tenant_id)
 
 
 def _sync_heartbeat_and_memory(base_id: str) -> None:
