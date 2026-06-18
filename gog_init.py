@@ -15,6 +15,19 @@ Manager and `just deploy-phase2` injects them as container env vars:
 
 where SAFE = email.upper().replace('@', '_AT_').replace('.', '_')
 
+Required OAuth scopes per capability (set in the infra repo via `just setup-google`,
+stored in Secrets Manager, then injected as GOG_ACCOUNT_<SAFE>_SCOPES):
+  - Save files to Drive (`gog drive upload/mkdir/move`):
+      https://www.googleapis.com/auth/drive        (full) or
+      https://www.googleapis.com/auth/drive.file   (files created/opened by the app)
+  - Move / archive / relabel email (`gog gmail archive`, `gog gmail messages modify`)
+    and move to Trash (`gog gmail trash`):
+      https://www.googleapis.com/auth/gmail.modify
+  - Permanently delete email (`gog gmail batch delete`):
+      https://mail.google.com/                     (full mailbox access)
+Read-only scopes (gmail.readonly / drive.readonly) are NOT sufficient for the above
+and will cause gog to fail with a 403 insufficient-scope error.
+
 This script writes the credential files that gogcli expects so it can
 authenticate without an interactive OAuth flow inside the container.
 gogcli stores credentials in ~/.config/gog/accounts/<email>.json
