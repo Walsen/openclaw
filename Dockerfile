@@ -49,8 +49,17 @@ ENV PATH="$PNPM_HOME:$PATH"
 # Install openclaw and clawhub via npm (not pnpm) to avoid pnpm v11 virtual
 # store layout issues where dependency links break at runtime.
 # pnpm is still installed for clawhub skill installs later.
-RUN npm install -g pnpm openclaw@latest clawhub@latest \
-        @smithy/node-http-handler @smithy/protocol-http @smithy/types && \
+#
+# PINNED to 2026.5.7 — the LAST release on the @mariozechner/pi-ai fork.
+# openclaw >= 2026.5.12 switched to @earendil-works/pi-ai (0.74+), whose
+# amazon-bedrock provider fails at runtime with:
+#   "Cannot find package '@smithy/node-http-handler' imported from
+#    .../@earendil-works/pi-ai/.../providers/amazon-bedrock.js"
+# which surfaces to callers as "LLM request failed" (the bedrock provider
+# never registers `bedrock-converse-stream`). The initial working deploy
+# (May 2026) used this fork. Do NOT bump to @latest without verifying the
+# bedrock provider's smithy deps resolve under a global npm install.
+RUN npm install -g pnpm openclaw@2026.5.7 clawhub@latest && \
     pnpm config set global-bin-dir "$PNPM_HOME"
 
 # Install gogcli — Google Workspace CLI (Go binary, not on npm)

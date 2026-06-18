@@ -223,11 +223,24 @@ fi
 # =============================================================================
 if [ -n "${GOG_ACCOUNTS:-}" ]; then
     echo "[entrypoint] Initializing gog credentials for: ${GOG_ACCOUNTS}"
+
+    # gogcli needs a writable keyring. A container has no OS keyring, so use the
+    # encrypted FILE backend. Both vars MUST be exported here (before gog_init.py
+    # AND before server.py / the gateway start) so every process that invokes
+    # `gog` — including the agent's shell tool subprocess — inherits them.
+    # Without these, gog cannot read or write the refresh token and the agent
+    # reports "missing OAuth client credentials".
+    export GOG_HOME="${GOG_HOME:-${HOME:-/root}/.config/gogcli}"
+    export GOG_KEYRING_BACKEND=file
+    # GOG_KEYRING_PASSWORD is injected from Secrets Manager by the infra repo's
+    # deploy-phase2. Fall back to a deterministic per-runtime value only so the
+    # file keyring can be created; rotate via the secret for production.
+    if [ -z "${GOG_KEYRING_PASSWORD:-}" ]; then
+        echo "[entrypoint] WARNING: GOG_KEYRING_PASSWORD not set — gog credentials will not persist correctly. Set it via the openclaw/google-oauth secret."
+    fi
+    echo "[entrypoint] GOG_HOME=${GOG_HOME} GOG_KEYRING_BACKEND=${GOG_KEYRING_BACKEND}"
+
     python3 /app/gog_init.py 2>&1 || echo "[entrypoint] gog_init.py failed (non-fatal)"
-    # Export GOG_CONFIG_DIR globally so all child processes (including gog CLI
-    # invoked by the agent's shell tool) can find the credential files.
-    export GOG_CONFIG_DIR="${HOME:-/root}/.config/gog"
-    echo "[entrypoint] GOG_CONFIG_DIR=${GOG_CONFIG_DIR}"
 else
     echo "[entrypoint] No GOG_ACCOUNTS set — Google Workspace integration not configured"
 fi
@@ -335,6 +348,19 @@ if [ "$GATEWAY_READY" = "false" ]; then
         echo "[entrypoint] Gateway still starting (Fargate: will be ready for next request)"
     else
         echo "[entrypoint] WARNING: Gateway not ready after ${GATEWAY_WAIT}s (tools may be unavailable)"
+    fi
+    # Surface the gateway log to stdout (CloudWatch) so the failure reason is
+    # visible — otherwise it stays hidden in /tmp inside the container.
+    if [ -f /tmp/openclaw-gateway.log ]; then
+        echo "[entrypoint] ----- gateway log (last 40 lines) -----"
+        tail -n 40 /tmp/openclaw-gateway.log 2>/dev/null | sed 's/^/[gateway] /'
+        echo "[entrypoint] ----- end gateway log -----"
+    fi
+    # Is the gateway process even alive?
+    if kill -0 "${GATEWAY_PID}" 2>/dev/null; then
+        echo "[entrypoint] Gateway PID ${GATEWAY_PID} is alive but not answering health check"
+    else
+        echo "[entrypoint] Gateway PID ${GATEWAY_PID} has EXITED (crashed during startup)"
     fi
 fi
 
