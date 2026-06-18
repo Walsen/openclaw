@@ -32,12 +32,33 @@ DEFAULT_PROFILE = {
 # In LOCAL_DEV mode grant full tool access — no DynamoDB permission lookup
 LOCAL_DEV_PROFILE = {
     "profile": "local",
-    "tools": ["web_search", "shell", "browser", "file", "file_write", "code_execution"],
+    "tools": ["web_search", "shell", "browser", "file", "file_write", "code_execution", "gog"],
     "data_permissions": {"file_paths": ["*"], "api_endpoints": ["*"]},
 }
 
 # Always blocked for standard agents — arbitrary code execution risk.
 ALWAYS_BLOCKED_TOOLS = {"load_extension", "eval"}
+
+# Google Workspace capability. `gog` runs via the shell, but is gated as its own
+# capability so a tenant can be granted Gmail/Drive/Calendar actions (e.g. saving
+# files to Drive, moving or trashing email) WITHOUT being granted general `shell`
+# (arbitrary command execution). Grant by adding "gog" to a position's toolAllowlist.
+GOOGLE_WORKSPACE_TOOL = "gog"
+
+# The full set of tool capabilities the permission system knows about. Used by the
+# prompt builders to compute the blocked list. Keep in sync with server.py.
+KNOWN_TOOLS = [
+    "web_search",
+    "shell",
+    "browser",
+    "file",
+    "file_write",
+    "code_execution",
+    "install_skill",
+    "load_extension",
+    "eval",
+    GOOGLE_WORKSPACE_TOOL,
+]
 
 
 class PermissionDeniedError(Exception):
