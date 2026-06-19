@@ -241,6 +241,46 @@ just push-ecr
 
 ---
 
+## Tool Capabilities & Permissions
+
+Each tenant gets a per-tenant tool allowlist. In production the allowlist comes
+from DynamoDB (resolved by `permissions.py`); in `LOCAL_DEV` mode it's the full
+local profile. `server.py` and the prompt builders use the allowlist to scope
+what the agent may do and to compute the blocked-tool list.
+
+| Capability | What it grants |
+|---|---|
+| `web_search` | Web search |
+| `shell` | Arbitrary shell command execution |
+| `gog` | Google Workspace (Gmail / Drive / Calendar) via the `gog` CLI — **without** general `shell` |
+| `browser` | Headless browser automation |
+| `file` / `file_write` | Read / write files in the workspace |
+| `code_execution` | Run code |
+
+`load_extension` and `eval` are **always blocked**, regardless of allowlist.
+
+### Google Workspace (`gog`)
+
+The `gog` capability lets a tenant run Gmail, Drive, and Calendar actions —
+reading mail, saving files to Drive, moving or trashing email, managing calendar
+events — through the `gog` CLI. It is gated as its own capability (separate from
+`shell`) so a tenant can be granted Workspace access **without** being able to run
+arbitrary commands (least privilege).
+
+- **Grant it** by adding `"gog"` to a position's `toolAllowlist` in the DynamoDB
+  app table (e.g. `toolAllowlist: ["web_search", "gog"]`).
+- **Credentials** (`GOG_*` env, including `GOG_KEYRING_PASSWORD`, and the OAuth
+  refresh tokens) are injected into the runtime by the infra repo's
+  `scripts/cli.py`, not baked into this image. Multiple Google accounts are
+  supported; the agent picks the default unless another is named.
+- **OAuth setup and account management** (consent flow, scopes, adding accounts)
+  live in [`Walsen/openclaw-agentcore-crew`](https://github.com/Walsen/openclaw-agentcore-crew)
+  — see its README "Google Workspace Integration" section.
+
+When a tenant has `gog` but not `shell`, the system prompt scopes shell guidance
+to `gog` commands only, advertises the available Gmail/Drive commands, and
+requires confirmation before destructive actions (e.g. trashing email).
+
 ## CI/CD
 
 **CI** (`.github/workflows/ci.yml`) — every push and PR:
