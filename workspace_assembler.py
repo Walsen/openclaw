@@ -286,6 +286,28 @@ def _build_context_block(
     except Exception as e:
         logger.warning("Language context failed: %s", e)
 
+    # 4.5. Which workspace files survive a restart.
+    # SOUL.md, AGENTS.md, TOOLS.md, IDENTITY.md, SESSION_CONTEXT.md and CHANNELS.md
+    # are rebuilt from S3 + DynamoDB on every start, and are excluded from the S3
+    # sync for that reason. Without this note the agent edits SOUL.md, sees the
+    # edit apply for the rest of the session, and loses it on the next start with
+    # no error anywhere. PERSONAL_SOUL.md is the persisted personal layer.
+    parts.append(
+        "<!-- WORKSPACE FILE OWNERSHIP -->\n"
+        "Some workspace files are GENERATED on every session start and any edit you make "
+        "to them is discarded:\n"
+        "- `SOUL.md` — assembled from the global + position + personal layers\n"
+        "- `AGENTS.md`, `TOOLS.md` — company/position policy, managed by IT\n"
+        "- `IDENTITY.md`, `SESSION_CONTEXT.md`, `CHANNELS.md` — generated from the employee record\n"
+        "- `knowledge/` — re-downloaded from the assigned knowledge bases\n\n"
+        "To change your own standing instructions PERSISTENTLY, edit **`PERSONAL_SOUL.md`** "
+        "(create it if missing). It is the personal layer: it survives restarts and is merged "
+        "into `SOUL.md` on the next start. Never edit `SOUL.md` directly for anything you want "
+        "to keep, and do not ask IT to change `AGENTS.md`/`TOOLS.md` through you.\n"
+        "Other durable locations: `MEMORY.md` and `memory/` (long-term memory), "
+        "`.learnings/` (self-improvement log), `output/` (files for the employee).\n"
+    )
+
     # 5. AWS Environment
     aws_region = os.environ.get("AWS_REGION", "us-east-1")
     parts.append(

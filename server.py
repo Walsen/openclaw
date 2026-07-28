@@ -74,12 +74,22 @@ GUARDRAIL_ID = os.environ.get("GUARDRAIL_ID", "")
 GUARDRAIL_VERSION = os.environ.get("GUARDRAIL_VERSION", "DRAFT")
 
 WORKSPACE = os.environ.get("OPENCLAW_WORKSPACE", "/root/.openclaw/workspace")
-S3_BUCKET = os.environ.get("S3_BUCKET", "openclaw-tenants-000000000000")
 STACK_NAME = os.environ.get("STACK_NAME", "dev")
 AWS_REGION_RUNTIME = os.environ.get("AWS_REGION", "us-east-1")
 DYNAMODB_TABLE = os.environ.get("DYNAMODB_TABLE", os.environ.get("STACK_NAME", "openclaw"))
 DYNAMODB_REGION = os.environ.get("DYNAMODB_REGION", os.environ.get("AWS_REGION", "us-east-1"))
 LOCAL_DEV = os.environ.get("LOCAL_DEV", "").lower() in ("1", "true", "yes")
+
+# No fallback bucket name here either. server.py syncs the workspace on its own
+# (per-request pull and post-turn flush), so a placeholder default would keep
+# writing into a nonexistent bucket even if entrypoint.sh were fixed alone.
+S3_BUCKET = os.environ.get("S3_BUCKET", "")
+if not S3_BUCKET and not LOCAL_DEV:
+    raise RuntimeError(
+        "S3_BUCKET is not set. Workspace sync would silently target a nonexistent "
+        "bucket and every tenant would lose memory on restart. Set S3_BUCKET "
+        "(e.g. openclaw-workspaces-<account>-<region>), or set LOCAL_DEV=true."
+    )
 
 if LOCAL_DEV:
     logger.info("LOCAL_DEV mode enabled — skipping S3/DynamoDB/SSM calls")
@@ -720,8 +730,37 @@ def _sync_heartbeat_and_memory(base_id: str) -> None:
         logger.warning("Post-invocation S3 sync failed (non-fatal): %s", e)
 
 
-def invoke_openclaw(tenant_id: str, message: str, timeout: int = 300, max_retries: int = 2) -> dict:
-    """Run openclaw agent CLI with automatic retry on transient failures."""
+_GATEWAY_PROBE_TTL = 10.0
+_gateway_probe: tuple[bool, float] = (False, 0.0)
+
+
+def _gateway_reachable(port: int = 18789) -> bool:
+    """Cheap cached TCP probe of the openclaw gateway, for /health."""
+    global _gateway_probe
+    ok, checked_at = _gateway_probe
+    now = time.time()
+    if now - checked_at < _GATEWAY_PROBE_TTL:
+        return ok
+    import socket
+
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=1):
+            ok = True
+    except OSError:
+        ok = False
+    _gateway_probe = (ok, now)
+    return ok
+
+
+def invoke_openclaw(tenant_id: str, message: str, timeout: int = 300, max_retries: int = 0) -> dict:
+    """Run openclaw agent CLI.
+
+    max_retries defaults to 0: an agent turn is NOT idempotent. Each attempt
+    re-injects the same user message into the same session, so a retry left
+    duplicate user turns in the conversation and memory, and any tool calls the
+    failed attempt already made (sending mail, writing files) happened twice.
+    Pass max_retries explicitly only for callers that are safe to replay.
+    """
     last_error = None
     for attempt in range(max_retries + 1):
         try:
@@ -896,7 +935,23 @@ class AgentCoreHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/ping":
+            # AgentCore liveness. Deliberately 200 whenever this process is up:
+            # returning 503 while the gateway boots would make the platform
+            # recycle the container in a loop. Use /health for readiness.
             self._respond(200, {"status": "Healthy", "time_of_last_update": int(time.time())})
+        elif self.path == "/health":
+            # Readiness: is this container actually able to run a turn? The
+            # gateway can be dead while /ping still answers, which used to be
+            # invisible to anything but a log line.
+            gw_ok = _gateway_reachable()
+            self._respond(
+                200 if gw_ok else 503,
+                {
+                    "status": "ready" if gw_ok else "degraded",
+                    "gateway": "up" if gw_ok else "unreachable",
+                    "detail": "" if gw_ok else "openclaw gateway is not answering on 127.0.0.1:18789; turns will fail",
+                },
+            )
         elif self.path == "/gateway-dashboard":
             self._handle_gateway_dashboard()
         elif self.path == "/gateway-approve-pairing":

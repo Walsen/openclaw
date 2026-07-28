@@ -8,7 +8,23 @@
 set -uo pipefail  # removed -e: server.py must start even if early commands fail
 
 TENANT_ID="${SESSION_ID:-${sessionId:-unknown}}"
-S3_BUCKET="${S3_BUCKET:-openclaw-tenants-000000000000}"
+
+# S3_BUCKET has no fallback on purpose.
+#
+# It used to default to "openclaw-tenants-000000000000", a bucket that does not
+# exist (the real one is openclaw-workspaces-<account>-<region>). Every aws call
+# in this script ends in `2>/dev/null || true`, so a bad bucket name did not fail
+# anything: the container passed its health check, served requests, and threw the
+# workspace away on every restart. Losing memory silently is worse than not
+# starting, so an unset S3_BUCKET is now a hard configuration error.
+if [ "${LOCAL_DEV:-}" != "true" ] && [ -z "${S3_BUCKET:-}" ]; then
+    echo "[entrypoint] FATAL: S3_BUCKET is not set — workspace persistence would silently no-op." >&2
+    echo "[entrypoint]   Set S3_BUCKET on the task definition (e.g. openclaw-workspaces-<account>-<region>)," >&2
+    echo "[entrypoint]   or set LOCAL_DEV=true to run without S3." >&2
+    exit 78  # EX_CONFIG
+fi
+# LOCAL_DEV never touches S3, but `set -u` still needs the variable to exist.
+S3_BUCKET="${S3_BUCKET:-local-dev-unused}"
 WORKSPACE="/root/.openclaw/workspace"
 SYNC_INTERVAL="${SYNC_INTERVAL:-60}"
 STACK_NAME="${STACK_NAME:-dev}"
@@ -122,9 +138,15 @@ else
     mkdir -p "$WORKSPACE" "$WORKSPACE/memory" "$WORKSPACE/skills"
 fi
 
-# Clean output/ directory on every cold start.
-rm -rf "$WORKSPACE/output" 2>/dev/null
-mkdir -p "$WORKSPACE/output"
+# Clean output/ on cold start — but NOT in EFS mode. There the workspace is a
+# persistent filesystem shared across restarts, so wiping it destroyed files the
+# agent had produced for the user (and that the S3 sync excludes anyway).
+if [ "$EFS_MODE" = "true" ]; then
+    mkdir -p "$WORKSPACE/output"
+else
+    rm -rf "$WORKSPACE/output" 2>/dev/null
+    mkdir -p "$WORKSPACE/output"
+fi
 
 # Symlink for backward compat (skill_loader, watchdog sync)
 ln -sfn "$WORKSPACE" /tmp/workspace
@@ -246,6 +268,51 @@ else
 fi
 
 # =============================================================================
+# Step 0.6.6: Jina Reader API key (optional)
+#
+# The jina-reader skill works on the free tier with no key at all. A key only
+# raises the rate/token limit. It can arrive two ways:
+#   1. JINA_API_KEY env var (set by the infra repo from the
+#      openclaw/skills/jina secret) — preferred.
+#   2. SSM /openclaw/<stack>/skill-keys/_global/JINA_API_KEY, which
+#      skill_loader.py exports into /tmp/skill_env.sh later in startup.
+# Here we take route 1 and also write the file the skill looks for, so the key
+# works whether the agent reads the env or the canonical config path.
+# See docs/SKILLS.md for how to buy and install a key.
+# =============================================================================
+if [ -n "${JINA_API_KEY:-}" ]; then
+    mkdir -p "${HOME:-/root}/.config/jina"
+    printf '%s' "$JINA_API_KEY" > "${HOME:-/root}/.config/jina/api_key"
+    chmod 600 "${HOME:-/root}/.config/jina/api_key"
+    # Also expose it to the agent subprocess via the shared env fragment.
+    if ! grep -q '^export JINA_API_KEY=' /tmp/skill_env.sh 2>/dev/null; then
+        echo "export JINA_API_KEY='${JINA_API_KEY}'" >> /tmp/skill_env.sh
+    fi
+    echo "[entrypoint] Jina Reader API key configured (paid tier limits apply)"
+else
+    echo "[entrypoint] No JINA_API_KEY — jina-reader will use the free tier"
+fi
+
+# =============================================================================
+# Step 0.6.7: Enable the self-improvement hook
+#
+# @pskoett/self-improving-agent ships a gateway hook that (a) reminds the agent
+# to consult .learnings/ at bootstrap and (b) sweeps ended sessions for errors.
+# Installing the skill is not enough: the hook must be enabled, and the sweep
+# only runs when the .learnings/ directory exists (that is the skill's own
+# opt-in switch). Set SELF_IMPROVEMENT_DISABLED=1 to skip both.
+# =============================================================================
+if [ -z "${SELF_IMPROVEMENT_DISABLED:-}" ] && \
+   [ -n "$(find /root/.openclaw/skills -maxdepth 2 -type d -name 'self-improving-agent' 2>/dev/null)" ]; then
+    mkdir -p "$WORKSPACE/.learnings"
+    if openclaw hooks enable self-improvement >/tmp/hook-enable.log 2>&1; then
+        echo "[entrypoint] self-improvement hook enabled (learnings dir: $WORKSPACE/.learnings)"
+    else
+        echo "[entrypoint] self-improvement hook not enabled (non-fatal): $(tail -1 /tmp/hook-enable.log 2>/dev/null)"
+    fi
+fi
+
+# =============================================================================
 # Step 0.6.1: Auto-connect IM channels from DynamoDB credentials (Fargate)
 # =============================================================================
 if [ "$EFS_MODE" = "true" ] && [ "$BASE_TENANT_ID" != "unknown" ]; then
@@ -347,7 +414,11 @@ if [ "$GATEWAY_READY" = "false" ]; then
     if [ "$EFS_MODE" = "true" ]; then
         echo "[entrypoint] Gateway still starting (Fargate: will be ready for next request)"
     else
-        echo "[entrypoint] WARNING: Gateway not ready after ${GATEWAY_WAIT}s (tools may be unavailable)"
+        # /ping deliberately stays 200 (AgentCore would recycle the container and
+        # we would lose the log evidence), so this line is the only signal that a
+        # container is up but cannot actually run a turn. It is distinct and
+        # greppable on purpose — alarm on it.
+        echo "[entrypoint] ERROR GATEWAY_UNAVAILABLE: gateway not ready after ${GATEWAY_WAIT}s — turns will fail"
     fi
     # Surface the gateway log to stdout (CloudWatch) so the failure reason is
     # visible — otherwise it stays hidden in /tmp inside the container.
@@ -500,12 +571,19 @@ cleanup() {
     # Stop server first — no new requests during shutdown
     kill "$SERVER_PID" 2>/dev/null || true
 
-    # Signal Gateway to shut down gracefully and WAIT for memory write
+    # Signal Gateway to shut down gracefully and WAIT for memory write.
+    # The budget is shared with the final S3 flush below, so it is capped rather
+    # than generous: if the platform SIGKILLs us first, neither completes. Raise
+    # GATEWAY_SHUTDOWN_GRACE only if the platform's stop timeout allows it.
+    GATEWAY_SHUTDOWN_GRACE="${GATEWAY_SHUTDOWN_GRACE:-15}"
     kill -SIGTERM "$GATEWAY_PID" 2>/dev/null || true
-    for i in $(seq 1 15); do
+    for i in $(seq 1 "$GATEWAY_SHUTDOWN_GRACE"); do
         kill -0 "$GATEWAY_PID" 2>/dev/null || break
         sleep 1
     done
+    if kill -0 "$GATEWAY_PID" 2>/dev/null; then
+        echo "[entrypoint] WARNING: gateway still running after ${GATEWAY_SHUTDOWN_GRACE}s — memory flush may be incomplete"
+    fi
     kill -9 "$GATEWAY_PID" 2>/dev/null || true
 
     # Stop background watchdog
@@ -530,10 +608,18 @@ cleanup() {
                 --region "$AWS_REGION" --quiet 2>/dev/null || true
             aws s3 cp "$WORKSPACE/MEMORY.md" "${SYNC_TARGET}MEMORY.md" \
                 --region "$AWS_REGION" --quiet 2>/dev/null || true
+            # Exclude list MUST match the watchdog loop above. It previously omitted
+            # SESSION_CONTEXT.md and CHANNELS.md, so those regenerated-every-start
+            # files were uploaded on shutdown but not during the session.
+            # Everything excluded here is a DERIVED artifact rebuilt by
+            # workspace_assembler.py on the next start — see "Workspace files" in
+            # the README. The SOURCE files (PERSONAL_SOUL.md, MEMORY.md, memory/,
+            # .learnings/, output/) are deliberately NOT excluded.
             aws s3 sync "$WORKSPACE/" "$SYNC_TARGET" \
                 --exclude "node_modules/*" --exclude "skills/_shared/*" --exclude "skills/*" \
                 --exclude "SOUL.md" --exclude "AGENTS.md" --exclude "TOOLS.md" \
-                --exclude "IDENTITY.md" --exclude ".personal_soul_backup.md" \
+                --exclude "IDENTITY.md" --exclude "SESSION_CONTEXT.md" --exclude "CHANNELS.md" \
+                --exclude ".personal_soul_backup.md" \
                 --exclude "knowledge/*" \
                 --size-only --region "$AWS_REGION" \
                 --quiet 2>/dev/null || true
