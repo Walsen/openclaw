@@ -28,12 +28,19 @@ For the full infrastructure (CDK stacks, Router Lambda, DynamoDB, etc.) see:
 | Python | 3.12-slim | 3.13-slim |
 | Node.js | 22.x | 24.x LTS |
 | Package manager | npm | pnpm |
-| OpenClaw | 2026.3.24 (pinned) | `@latest` |
-| ClawHub | `@latest` | `@latest` |
+| OpenClaw | 2026.3.24 (pinned) | `2026.6.33` (pinned) |
+| Bedrock provider plugin | n/a (was built in) | `@openclaw/amazon-bedrock-provider@2026.6.33` |
+| ClawHub | `@latest` | `0.23.1` (pinned) |
+| gogcli | n/a | `0.34.1` |
+| AWS CLI | v1 (pip) | v2 (official installer) |
 | boto3 | >=1.34.0 | >=1.38.0 |
 | requests | >=2.31.0 | >=2.32.0 |
 
-> The original pinned OpenClaw to `2026.3.24` due to a breaking change in `2026.3.28` affecting IM channel delivery. Test Telegram/Discord/Slack end-to-end after upgrading.
+> **OpenClaw and the Bedrock provider plugin must be bumped together.** From
+> `2026.6.x` the Bedrock provider is a separate package and openclaw core carries
+> no AWS SDK, so upgrading openclaw alone leaves the agent unable to reach a model.
+> Both versions are `Dockerfile` build args; the build fails if the plugin does not
+> register. See [docs/SKILLS.md](docs/SKILLS.md).
 
 ---
 
@@ -163,9 +170,9 @@ just push-ecr      # push to ECR (needs AWS_ACCOUNT + AWS_REGION)
 # Build for ARM64 (required by AgentCore Runtime)
 docker build --platform linux/arm64 -t ffactory/openclaw:latest .
 
-# Custom pre-installed skills
+# Custom pre-installed skills — always scoped AND version-pinned
 docker build --platform linux/arm64 \
-  --build-arg SKILLS_PREINSTALL="deep-research-pro jina-reader" \
+  --build-arg SKILLS_PREINSTALL="@parags/deep-research-pro@1.0.2" \
   -t ffactory/openclaw:latest .
 ```
 
@@ -173,8 +180,55 @@ docker build --platform linux/arm64 \
 
 | ARG | Default | Description |
 |---|---|---|
-| `TARGETARCH` | `arm64` | Target architecture |
-| `SKILLS_PREINSTALL` | `deep-research-pro self-improving-agent jina-reader skill-vetter` | ClawHub skills baked into the image |
+| `TARGETARCH` | injected by BuildKit | Target architecture — do not give this a default |
+| `OPENCLAW_VERSION` | `2026.6.33` | Must match `BEDROCK_PROVIDER_VERSION` |
+| `BEDROCK_PROVIDER_VERSION` | `2026.6.33` | `@openclaw/amazon-bedrock-provider`; peer-depends on openclaw |
+| `GOGCLI_VERSION` | `0.34.1` | Google Workspace CLI binary |
+| `SKILLS_PREINSTALL` | see [docs/SKILLS.md](docs/SKILLS.md) | Scoped, version-pinned ClawHub skills |
+| `SKILLS_STRICT` | `1` | Fail the build if a requested skill is missing |
+
+**What the agent can do, and how to drive it** — what each baked skill and plugin
+does, how to add or remove them, how to vet a new one, and how to install a paid
+Jina Reader API key: **[docs/SKILLS.md](docs/SKILLS.md)**.
+
+---
+
+## Workspace files: generated vs persisted
+
+The workspace mixes two kinds of file, and confusing them is the usual cause of
+"the agent forgot what I told it".
+
+**Generated on every session start** by `workspace_assembler.py`, from S3 and
+DynamoDB. Edits to these are discarded, and they are excluded from the S3 sync
+because re-uploading a derived file would be pointless churn:
+
+| File | Built from |
+|---|---|
+| `SOUL.md` | `_shared/soul/global/` + `_shared/soul/positions/<pos>/` + `PERSONAL_SOUL.md`, plus the runtime context block |
+| `AGENTS.md` | global + position `AGENTS.md` |
+| `TOOLS.md` | global `TOOLS.md` |
+| `IDENTITY.md` | the employee's DynamoDB `EMP#` record |
+| `SESSION_CONTEXT.md` | session type (employee / playground / twin / admin) |
+| `CHANNELS.md` | the employee's IM channel pairings |
+| `knowledge/` | assigned knowledge bases (`CONFIG#kb-assignments`) |
+
+**Persisted to S3** — the real state, synced by the watchdog and on shutdown:
+
+| Path | Purpose |
+|---|---|
+| `PERSONAL_SOUL.md` | **the personal layer** — the writable source of the agent's standing instructions |
+| `MEMORY.md`, `memory/` | long-term memory |
+| `.learnings/` | self-improvement log (see [docs/SKILLS.md](docs/SKILLS.md)) |
+| `output/` | files produced for the employee |
+
+So to change an agent's standing behaviour durably, edit **`PERSONAL_SOUL.md`**,
+not `SOUL.md`. The agent is now told this explicitly in its context block; before
+that it would edit `SOUL.md`, watch the change take effect for the rest of the
+session, and lose it at the next start with no error logged anywhere.
+
+Company-wide and per-position instructions are deliberately not writable from the
+container: they live in S3 under `_shared/soul/` and are managed through the Admin
+Console.
 
 ### Push to ECR
 
@@ -223,7 +277,7 @@ just push-ecr
 | Variable | Default | Description |
 |---|---|---|
 | `SESSION_ID` | `unknown` | Tenant / session identifier |
-| `S3_BUCKET` | `openclaw-tenants-000000000000` | Workspace S3 bucket |
+| `S3_BUCKET` | **required** (no default) | Workspace S3 bucket, e.g. `openclaw-workspaces-<account>-<region>`. Startup fails with exit 78 if unset, unless `LOCAL_DEV=true` |
 | `STACK_NAME` | `dev` | CloudFormation stack name |
 | `AWS_REGION` | `us-east-1` | AWS region |
 | `BEDROCK_MODEL_ID` | `global.anthropic.claude-sonnet-4-6` | Bedrock model ID |
