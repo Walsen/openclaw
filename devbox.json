@@ -10,7 +10,8 @@
     "yq@latest",
     "shellcheck@latest",
     "docker@latest",
-    "awscli2@latest"
+    "awscli2@latest",
+    "git@latest"
   ],
   "shell": {
     "init_hook": [
@@ -22,7 +23,7 @@
       "lint":    "ruff check . && ruff format --check . && shellcheck entrypoint.sh",
       "fmt":     "ruff format .",
       "test":    "python -m pytest tests/ -v --tb=short 2>/dev/null || echo 'No tests found'",
-      "compile": "python -m py_compile server.py workspace_assembler.py permissions.py identity.py memory.py observability.py safety.py skill_loader.py auth-agent/permission_request.py",
+      "compile": "python -m py_compile server.py workspace_assembler.py permissions.py identity.py memory.py observability.py safety.py skill_loader.py gog_init.py auth-agent/permission_request.py",
       "check":   "bash scripts/pre-commit.sh",
       "up":      "docker compose up",
       "down":    "docker compose down",
