@@ -49,6 +49,7 @@
     }
   },
   "plugins": {
+    "allow": ["amazon-bedrock"],
     "entries": {
       "amazon-bedrock": {
         "config": {

@@ -56,10 +56,14 @@ fmt:
 
 # Compile-check all Python files
 compile:
-    @for f in server.py workspace_assembler.py permissions.py identity.py \
-               memory.py observability.py safety.py skill_loader.py \
-               auth-agent/permission_request.py; do \
-        python3 -m py_compile "$$f" && echo "OK $$f"; \
+    #!/usr/bin/env bash
+    # Shebang recipe so this is one bash script: `$$f` in a plain just recipe
+    # expands to the shell PID followed by "f", which made this recipe always fail.
+    set -euo pipefail
+    for f in server.py workspace_assembler.py permissions.py identity.py \
+             memory.py observability.py safety.py skill_loader.py \
+             gog_init.py auth-agent/permission_request.py; do
+        python3 -m py_compile "$f" && echo "OK $f"
     done
 
 # Run tests

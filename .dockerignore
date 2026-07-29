@@ -1,9 +1,35 @@
+# Keep the build context small: everything here is either dev-only tooling or
+# host-specific state. Sending it wastes upload time and invalidates layer cache
+# on edits that never reach the image.
+
+# VCS
 .git
 .gitignore
 .dockerignore
+
+# Docs / licence
 README.md
 LICENSE
+
+# Python
 __pycache__
 *.pyc
 .venv
+.ruff_cache
+uv.lock
+
+# Secrets / local env
 .env
+local.env.example
+.envrc
+
+# Dev tooling (not used inside the image)
+.devbox
+.kiro
+.github
+scripts
+docker-compose.yml
+Justfile
+devbox.json
+devbox.lock
+bandit.toml
