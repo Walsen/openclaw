@@ -44,10 +44,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Left on v4 deliberately: v5/v6 changed credential-resolution defaults,
-      # and this step holds the OIDC role that can update the live runtime.
+      # v6 runs on node24 (needs runner >= v2.327.1, which GitHub-hosted runners
+      # already exceed). v5's only breaking change was invalid-boolean input
+      # handling, and this step passes two string inputs.
       - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
